@@ -34,9 +34,11 @@ separately**:
 - **A verdict** from an 8-way taxonomy:
   `AGREE_SUCCESS`, `AGREE_ERROR`, `DV`, `CANCELED`, `TIMEOUT`, `THROW`,
   `SKIPPED`, `OTHER`
-- **The per-validator vote vector** (not just a boolean) — so you can see a
-  4-1 squeaker differently from a clean 5-0
+- **The ordered per-validator vote vector** (`deployVoteVector` /
+  `resolveVoteVector`) *and* the collapsed counts, so a 4-1 split is
+  distinguishable from a clean 5-0
 - **Whether all validator result hashes were identical**
+  (`deployHashesIdentical` / `resolveHashesIdentical`)
 - Contract address, elapsed time, and whether the time budget was hit
 
 Across runs it aggregates verdict counts and **median / p95 latency** for
@@ -47,9 +49,12 @@ Output is machine-readable: one `RUN::{json}` line per run, then a final
 
 ### The verdict taxonomy is the point
 
-`AGREE_ERROR` is the one people miss. A transaction can be **ACCEPTED with all
-validators agreeing** — and what they agreed on is that your contract raised.
-Counting that as success is how a broken oracle looks healthy on a dashboard.
+`AGREE_ERROR` is the one people miss. A transaction can be **ACCEPTED** while
+the execution result is an error — the network settled, and what it settled on
+is that your contract raised. Counting that as success is how a broken oracle
+looks healthy on a dashboard. (The classifier keys off the accepted/finalized
+status plus an error execution result; read the vote vector alongside it if you
+also care whether the agreement was unanimous.)
 
 `DV` is decided by **vote-vector precedence**, not by the status label: if 4+
 validators report `DISAGREE` or `DETERMINISTIC_VIOLATION`, it is a DV regardless

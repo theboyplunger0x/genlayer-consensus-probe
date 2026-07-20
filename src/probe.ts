@@ -94,6 +94,7 @@ type Verdict =
 interface StageResult {
   hash: string;
   verdict: Verdict;
+  voteVector: string[];   // ordered per-validator votes, as returned
   statusName: string;
   txExecutionResultName: string;
   votes: Record<string, number>;
@@ -110,10 +111,14 @@ interface RunResult {
   deployHash: string;
   deployVerdict: Verdict;
   deployVotes: Record<string, number>;
+  deployVoteVector: string[];
+  deployHashesIdentical: boolean;
   deployElapsedMs: number;
   resolveHash: string;
   resolveVerdict: Verdict;
   resolveVotes: Record<string, number>;
+  resolveVoteVector: string[];
+  resolveHashesIdentical: boolean;
   resolveElapsedMs: number;
   totalMs: number;
   budgetHit: boolean;
@@ -181,6 +186,23 @@ const jsonSafe = (value: unknown): string =>
 // ---------------------------------------------------------------------------
 // Phase 5d / 5e helpers (mirrors deployBradburyV4Worldcup.ts / batchRunV4.ts)
 // ---------------------------------------------------------------------------
+
+// The ORDERED per-validator votes, preserving position. aggregateVotes() below
+// collapses these into counts, which loses which validator dissented; both are
+// reported because a 4-1 split and a 5-0 are different facts.
+const voteVectorOf = (tx: unknown): string[] => {
+  const lr = (tx as { lastRound?: { validatorVotesName?: unknown; validatorVotes?: unknown } })
+    ?.lastRound;
+  const named = lr?.validatorVotesName;
+  if (Array.isArray(named) && named.length > 0) {
+    return named.map((v) => (typeof v === "string" ? v : String(v)));
+  }
+  const numeric = lr?.validatorVotes;
+  if (Array.isArray(numeric) && numeric.length > 0) {
+    return numeric.map((v) => String(v));
+  }
+  return [];
+};
 
 const aggregateVotes = (tx: unknown): Record<string, number> => {
   const out: Record<string, number> = {};
@@ -414,6 +436,7 @@ function makeSkippedStage(reason: string): StageResult {
     txExecutionResultName: "SKIPPED",
     votes: {},
     contractAddress: "",
+    voteVector: [],
     hashesIdentical: false,
     elapsedMs: 0,
     budgetHit: false,
@@ -434,6 +457,7 @@ function summarizeStage(
   const statusName = (t?.statusName as string) ?? "UNKNOWN";
   const execName = (t?.txExecutionResultName as string) ?? "UNKNOWN";
   const votes = aggregateVotes(tx);
+  const voteVector = voteVectorOf(tx);
   const contractAddress = extractContractAddress(tx);
   const hashesIdentical = validatorHashesIdentical(tx);
   let verdict: Verdict = classifyVerdict(statusName, execName, votes);
@@ -448,6 +472,7 @@ function summarizeStage(
     statusName,
     txExecutionResultName: execName,
     votes,
+    voteVector,
     contractAddress,
     hashesIdentical,
     elapsedMs,
@@ -498,7 +523,8 @@ async function runOnce(
       txExecutionResultName: "THROW",
       votes: {},
       contractAddress: "",
-      hashesIdentical: false,
+      voteVector: [],
+    hashesIdentical: false,
       elapsedMs: Date.now() - runStart,
       budgetHit: false,
       errorDetail: msg,
@@ -556,7 +582,8 @@ async function runOnce(
         txExecutionResultName: "THROW",
         votes: {},
         contractAddress: deployStage.contractAddress,
-        hashesIdentical: false,
+        voteVector: [],
+    hashesIdentical: false,
         elapsedMs: Date.now() - (runStart + usedSoFar),
         budgetHit: false,
         errorDetail: msg,
@@ -572,10 +599,14 @@ async function runOnce(
     deployHash: deployStage.hash,
     deployVerdict: deployStage.verdict,
     deployVotes: deployStage.votes,
+    deployVoteVector: deployStage.voteVector,
+    deployHashesIdentical: deployStage.hashesIdentical,
     deployElapsedMs: deployStage.elapsedMs,
     resolveHash: resolveStage.hash,
     resolveVerdict: resolveStage.verdict,
     resolveVotes: resolveStage.votes,
+    resolveVoteVector: resolveStage.voteVector,
+    resolveHashesIdentical: resolveStage.hashesIdentical,
     resolveElapsedMs: resolveStage.elapsedMs,
     totalMs,
     budgetHit: deployStage.budgetHit || resolveStage.budgetHit,
@@ -798,10 +829,14 @@ async function main(): Promise<void> {
         deployHash: "",
         deployVerdict: "THROW",
         deployVotes: {},
+        deployVoteVector: [],
+        deployHashesIdentical: false,
         deployElapsedMs: 0,
         resolveHash: "",
         resolveVerdict: "SKIPPED",
         resolveVotes: {},
+        resolveVoteVector: [],
+        resolveHashesIdentical: false,
         resolveElapsedMs: 0,
         totalMs: 0,
         budgetHit: false,

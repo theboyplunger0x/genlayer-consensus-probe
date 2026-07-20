@@ -4,7 +4,7 @@ Measure whether a GenLayer Intelligent Contract **actually reaches consensus**,
 how often, and how it fails.
 
 ```bash
-probe --contract ./my_contract.py --args '["BTC","base"]' --n 10
+npx tsx src/probe.ts --contract ./my_contract.py --args '["BTC","base"]' --n 10
 ```
 
 ---
@@ -100,7 +100,7 @@ On `localnet` a fresh account is generated and funded automatically.
 Running it against a no-LLM price oracle:
 
 ```
-$ probe --contract ./price_oracle.py --args '["BTC","base"]' --n 1
+$ npx tsx src/probe.ts --contract ./price_oracle.py --args '["BTC","base"]' --n 1
 
 [run 1] deployHash=0x1f015aa0c7b157d9e3f7c521f29af223a176a836cf4a5de69e18b37dee2f5d63
 [run1_deploy]  poll status=REVEALING   exec=FINISHED_WITH_RETURN elapsed=6264ms
@@ -121,23 +121,29 @@ RUN::{"deployVerdict":"AGREE_SUCCESS","deployVotes":{"AGREE":5},
 Every one of these cost a debugging session. They are baked into the probe so
 they do not have to cost you one.
 
-**1. Do not call a write method immediately after deploy.** It reverts at the
-EVM level:
+**1. A write fired immediately after deploy can revert at the EVM level.**
 
 ```
 Transaction reverted: EVM tx 0xe19e3052... to consensus contract
 0x0112Bf6e83497965A5fdD6Dad1E447a6E004271D was reverted.
 ```
 
-Observed 2.2 seconds after a successful `{AGREE: 5}` deploy. The identical call
-to the identical contract address succeeded once the deploy had settled. This is
-why `--settle` defaults to 15 seconds. Set `--settle 0` to reproduce the revert.
+Observed 2.2 seconds after a successful `{AGREE: 5}` deploy; the same call to
+the same address then succeeded after a wait. That is a single observation, not
+a controlled experiment, and **a delay is not a guaranteed fix** — earlier runs
+in our own logs still hit EVM reverts with a 25 second post-deploy delay. So:
+`--settle` defaults to 15s because waiting appeared to help, but treat this
+revert as a known flake to retry through rather than a solved problem.
 
-**2. Use `getTransaction`, not `getTransactionReceipt`.** The latter is EVM-only
-and reports "not found" for GenLayer transactions.
+**2. A *generic EVM* receipt method returns "not found" for GenLayer txs.**
+Reaching for Viem's `getTransactionReceipt` is the natural mistake; use
+genlayer-js's `getTransaction` instead. (genlayer-js has its own
+`waitForTransactionReceipt`, which is documented and supported — this note is
+about the EVM-client one, not that.)
 
-**3. Do not `waitForTransactionReceipt`.** The receipt indexer can lag well
-behind finality. Submit, then poll `getTransaction`.
+**3. In our bradbury runs the indexer lagged**, so this probe submits and then
+polls `getTransaction` rather than waiting on a receipt. If your network and SDK
+version behave better, waiting is fine.
 
 **4. `status: 14` is transient, not an error.** It appears mid-flight and
 resolves on a later poll. Treat it as "keep polling".
@@ -145,8 +151,9 @@ resolves on a later poll. Treat it as "keep polling".
 **5. Votes are not where you would guess.** They live at
 `tx.lastRound.validatorVotes` (numeric) and `tx.lastRound.validatorVotesName`
 (labels), alongside `votesCommitted` / `votesRevealed`. The verdict is
-`tx.resultName`; the execution outcome is `tx.txExecutionResultName`. There is
-no `consensus_data.votes` on current bradbury responses.
+`tx.resultName`; the execution outcome is `tx.txExecutionResultName`. Our
+bradbury responses did not populate `consensus_data.votes`, so the probe reads
+`lastRound` first and only falls back to `consensus_data.votes` if present.
 
 **6. Statuses you will actually see while polling:** `COMMITTING`, `REVEALING`,
 `ACCEPTED`, `FINALIZED`, `UNDETERMINED`, `CANCELED`. Only the last four are
@@ -169,9 +176,10 @@ decided.
 
 ## Provenance
 
-This probe was extracted from the harness used to run a multi-phase study of
-equivalence-principle behaviour on bradbury. The study it produced (an N=20
-apples-to-apples comparison of an LLM-in-the-loop contract against a
-deterministic one) and the contract used in the example above are separate
-artifacts in their own repositories. Stating the relationship plainly:
-**this is the instrument; the study and the contract are downstream of it.**
+This probe was generalized from one member of a family of single-purpose
+runners used in a multi-phase study of equivalence-principle behaviour on
+bradbury. To be precise about what that means: **the published probe is not the
+literal executable that produced those historical runs** — those used sibling
+scripts, each hardcoded to its own contract. This is the descendant that was
+parameterized afterwards so the same measurement can be pointed at any contract.
+The contract used in the example above lives in its own repository.
